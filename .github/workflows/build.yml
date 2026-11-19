@@ -1,0 +1,61 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  ARM_GCC_VERSION: 13.3.rel1
+  ARM_GCC_NAME: arm-gnu-toolchain-13.3.rel1-x86_64-arm-none-eabi
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        stage: [3, 4]
+
+    steps:
+      - name: Checkout (with the mtkernel submodule)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Cache Arm GNU Toolchain
+        id: cache-gcc
+        uses: actions/cache@v4
+        with:
+          path: ~/toolchain
+          key: ${{ env.ARM_GCC_NAME }}
+
+      - name: Install Arm GNU Toolchain ${{ env.ARM_GCC_VERSION }}
+        if: steps.cache-gcc.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/toolchain
+          curl -fsSL "https://developer.arm.com/-/media/Files/downloads/gnu/${ARM_GCC_VERSION}/binrel/${ARM_GCC_NAME}.tar.xz" | tar -xJ -C ~/toolchain
+
+      - name: Add toolchain to PATH
+        run: echo "$HOME/toolchain/${ARM_GCC_NAME}/bin" >> "$GITHUB_PATH"
+
+      - name: Show toolchain version
+        run: arm-none-eabi-gcc --version | head -1
+
+      - name: Build milestone ${{ matrix.stage }}
+        run: make STAGE=${{ matrix.stage }} -j"$(nproc)"
+
+      - name: Upload firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: mtk3_f769i_disco-stage${{ matrix.stage }}
+          path: |
+            build/stage${{ matrix.stage }}/*.elf
+            build/stage${{ matrix.stage }}/*.hex
+            build/stage${{ matrix.stage }}/*.bin
+            build/stage${{ matrix.stage }}/*.map
+          if-no-files-found: error
